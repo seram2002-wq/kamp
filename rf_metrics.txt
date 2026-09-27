@@ -1,0 +1,2 @@
+train_mse=22.8298
+test_mse=118.9541
