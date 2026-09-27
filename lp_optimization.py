@@ -23,12 +23,28 @@
               구하고 합산합니다. 가이드북 수치(610.42, 5.0명)와의 일치를
               주장하지 않습니다 — 어디까지나 같은 문제구조를 실데이터에 적용해본
               참고용 확장입니다.
+
+구현 노트(Windows 사용자용):
+    이전 버전은 pulp + CBC(cbc.exe 외부 실행파일)를 사용했는데, 이 방식은
+    행마다 별도의 외부 프로세스를 새로 띄우기 때문에 Windows + 보안 프로그램
+    환경에서 극도로 느려지거나(또는 다시 차단당할) 위험이 있었습니다. 그래서
+    이번 버전은 scipy.optimize.linprog로 교체했습니다 — 외부 실행파일을 전혀
+    부르지 않고 파이썬 프로세스 안에서 직접 계산하므로 훨씬 빠르고 안전합니다
+    (scipy는 scikit-learn의 의존 라이브러리라 이미 정상 동작이 확인된 상태).
+    결과값은 동일합니다.
 """
+import numpy as np
 import pandas as pd
-import pulp
+from scipy.optimize import linprog
 
 DATA_PATH = "./data/okm_augumented_2021.csv"
 df = pd.read_csv(DATA_PATH)
+
+# 공통 제약조건: 1<=P_electric<=2, 1<=P_human<=75, 11<=2*P_electric+P_human<=95
+# linprog는 "<=" 부등식만 받으므로 2*Pe+Ph>=11 은 -2*Pe-Ph<=-11 로 변환
+A_ub = [[-2, -1], [2, 1]]
+b_ub = [-11, 95]
+bounds = [(1, 2), (1, 75)]  # (P_electric, P_human)
 
 # =========================================================================
 # Part A. 가이드북 그대로: 생산량과 무관한 정적 LP 1회 풀이
@@ -37,20 +53,14 @@ print("=" * 70)
 print("[Part A] 가이드북 공개 그대로의 정적 LP (생산량 미반영)")
 print("=" * 70)
 
-prob_static = pulp.LpProblem("kamp_static_lp", pulp.LpMinimize)
-P_electric = pulp.LpVariable("P_electric", lowBound=1, upBound=2)
-P_human = pulp.LpVariable("P_human", lowBound=1, upBound=75)
+c_static = [1, 1]  # Cost = P_electric + P_human
+res_static = linprog(c_static, A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs")
 
-prob_static += P_human + P_electric, "Cost"
-prob_static += 2 * P_electric + P_human >= 11, "lower_bound"
-prob_static += 2 * P_electric + P_human <= 95, "upper_bound"
-
-prob_static.solve(pulp.PULP_CBC_CMD(msg=False))
-
-print(f"status: {pulp.LpStatus[prob_static.status]}")
-print(f"P_electric = {P_electric.value()}")
-print(f"P_human    = {P_human.value()}")
-print(f"Cost(최소) = {pulp.value(prob_static.objective)}")
+P_electric_static, P_human_static = res_static.x
+print(f"status: {'Optimal' if res_static.success else res_static.message}")
+print(f"P_electric = {P_electric_static}")
+print(f"P_human    = {P_human_static}")
+print(f"Cost(최소) = {res_static.fun}")
 print(
     "\n[해석] 가이드북이 공개한 3개 부등식만으로는 목적함수가 P_electric을 "
     "상한(2)까지, P_human을 하한 제약이 만족되는 최소값까지 밀어붙이는 "
@@ -62,41 +72,41 @@ print(
 
 # =========================================================================
 # Part B. 우리의 확장: 실제 인건비/전기요금(계절)을 목적함수 계수로 사용해
-#          데이터셋의 모든 시간(행)에 대해 반복 실행
+#          데이터셋의 모든 시간(행)에 대해 반복 실행 (scipy, 외부 프로세스 없음)
 # =========================================================================
 print("\n" + "=" * 70)
 print("[Part B] 확장 재현 — 실제 인건비/전기요금(계절)을 비용계수로 사용")
 print("(※ 가이드북에 없는 우리의 해석 — 참고용)")
 print("=" * 70)
 
-results = []
-for idx, row in df.iterrows():
-    wage = row["인건비"]
-    elec_rate = row["전기요금(계절)"]
+wages = df["인건비"].to_numpy()
+elec_rates = df["전기요금(계절)"].to_numpy()
+n = len(df)
 
-    prob = pulp.LpProblem(f"lp_row_{idx}", pulp.LpMinimize)
-    pe = pulp.LpVariable("P_electric", lowBound=1, upBound=2)
-    ph = pulp.LpVariable("P_human", lowBound=1, upBound=75)
+P_electric_arr = np.empty(n)
+P_human_arr = np.empty(n)
+cost_arr = np.empty(n)
 
-    prob += wage * ph + elec_rate * pe, "Cost"
-    prob += 2 * pe + ph >= 11
-    prob += 2 * pe + ph <= 95
-
-    prob.solve(pulp.PULP_CBC_CMD(msg=False))
-
-    results.append(
-        {
-            "index": idx,
-            "생산량": row["생산량"],
-            "인건비": wage,
-            "전기요금(계절)": elec_rate,
-            "추천_P_electric": pe.value(),
-            "추천_P_human": ph.value(),
-            "최소비용": pulp.value(prob.objective),
-        }
+for i in range(n):
+    res = linprog(
+        [elec_rates[i], wages[i]],  # [P_electric 계수, P_human 계수]
+        A_ub=A_ub, b_ub=b_ub, bounds=bounds, method="highs",
     )
+    P_electric_arr[i] = res.x[0]
+    P_human_arr[i] = res.x[1]
+    cost_arr[i] = res.fun
 
-res_df = pd.DataFrame(results)
+res_df = pd.DataFrame(
+    {
+        "index": df.index,
+        "생산량": df["생산량"].to_numpy(),
+        "인건비": wages,
+        "전기요금(계절)": elec_rates,
+        "추천_P_electric": P_electric_arr,
+        "추천_P_human": P_human_arr,
+        "최소비용": cost_arr,
+    }
+)
 res_df.to_csv("lp_optimization_result.csv", index=False)
 
 total_cost = res_df["최소비용"].sum()
@@ -116,9 +126,9 @@ print("\n[참고] 가이드북 예시 생산량(정규화 0.1718...)에 가장 �
 print(closest.to_string(index=False))
 
 with open("lp_metrics.txt", "w") as f:
-    f.write(f"static_cost={pulp.value(prob_static.objective):.4f}\n")
-    f.write(f"static_P_human={P_human.value()}\n")
-    f.write(f"static_P_electric={P_electric.value()}\n")
+    f.write(f"static_cost={res_static.fun:.4f}\n")
+    f.write(f"static_P_human={P_human_static}\n")
+    f.write(f"static_P_electric={P_electric_static}\n")
     f.write(f"batch_total_cost={total_cost:.4f}\n")
     f.write(f"batch_mean_P_human={mean_human:.4f}\n")
     f.write(f"batch_mean_P_electric={mean_electric:.4f}\n")
