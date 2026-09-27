@@ -1,2 +1,2 @@
-train_mse=22.8298
-test_mse=118.9541
+train_mse=23.2458
+test_mse=130.8202

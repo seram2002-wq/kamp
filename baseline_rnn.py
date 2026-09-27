@@ -11,6 +11,7 @@
 피처로 만들고 MinMax 정규화 후 RNN에 넣어 예측했다. 정확한 레이어 구성은
 가이드북에 공개돼 있지 않아, 여기서는 통상적인 Simple RNN 구조로 재현한다.
 """
+import os
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
@@ -20,6 +21,8 @@ from tensorflow import keras
 
 tf.random.set_seed(42)
 np.random.seed(42)
+
+os.makedirs("results", exist_ok=True)  # 결과물을 results/ 폴더에 정리 저장
 
 DATA_PATH = "./data/okm_augumented_2021.csv"
 N_LAGS = 168          # 1주일치 시간별 lag (가이드북과 동일)
@@ -83,15 +86,15 @@ print(f"test MSE (원단위): {test_mse:.4f}")
 print(f"test RMSE (원단위): {np.sqrt(test_mse):.4f}")
 
 result_df = pd.DataFrame({"actual_15min": actual, "forecast": pred})
-result_df.to_csv("rnn_forecast_result.csv", index=False)
-with open("rnn_metrics.txt", "w") as f:
+result_df.to_csv("results/rnn_forecast_result.csv", index=False)
+with open("results/rnn_metrics.txt", "w") as f:
     f.write(f"test_mse={test_mse:.4f}\ntest_rmse={np.sqrt(test_mse):.4f}\n")
 
 # 시각화 ------------------------------------------------------------------
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-plt.rcParams["font.family"] = "Malgun Gothic"
+plt.rcParams["font.family"] = "Malgun Gothic"  # Windows 기본 한글 폰트 (NanumGothic은 별도 설치 필요해서 교체)
 plt.rcParams["axes.unicode_minus"] = False
 
 plt.figure(figsize=(11, 4))
@@ -102,5 +105,5 @@ plt.xlabel("시간 (시간 단위, 336=2주)")
 plt.ylabel("15분 피크소비량")
 plt.legend()
 plt.tight_layout()
-plt.savefig("rnn_forecast_plot.png", dpi=130)
+plt.savefig("results/rnn_forecast_plot.png", dpi=130)
 print("[정보] rnn_forecast_plot.png 저장 완료")

@@ -13,10 +13,13 @@
 구성요소)을 피처에서 제외해 데이터 누수를 막고, 시간 순서를 지키기 위해
 RNN 재현과 동일하게 9월 1~14일(336시간)을 테스트셋으로 고정했다.
 """
+import os
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
+
+os.makedirs("results", exist_ok=True)  # 결과물을 results/ 폴더에 정리 저장
 
 DATA_PATH = "./data/okm_augumented_2021.csv"
 
@@ -32,6 +35,19 @@ print(f"[정보] 데이터 shape: {df.shape}")
 df["풍속"] = df["풍속"].interpolate()
 df["강수량"] = df["강수량"].interpolate().fillna(0)
 df["공장인원"] = df["공장인원"].fillna(0)
+
+# 이상치 보정: "시간" 컬럼이 0~23 범위를 벗어난 48개 행(2021-07-13, 07-15 두 날짜)
+# -> 확인 결과 두 날짜 모두 24행이 그대로 존재하고 앞뒤 날짜와 행 순서(인덱스)도
+# 이어져 있어, 데이터가 밀리거나 빠진 게 아니라 "시간" 값 자체만 깨진 것으로 판단.
+# 두 날짜 모두 생산량이 24시간 내내 0이라 어느 시점에 어떤 값이었는지 다툴 여지가
+# 없으므로, 각 날짜 안에서 행이 등장한 순서를 그대로 0~23시로 재구성한다(행 삭제
+# 없이 보정 -> RNN의 168시간 lag 구간에 결측 구간이 생기지 않도록 함).
+anomaly_dates = df.loc[~df["시간"].between(0, 23), "날짜"].unique()
+for d in anomaly_dates:
+    idx = df.index[df["날짜"] == d]
+    df.loc[idx, "시간"] = range(len(idx))
+remaining_violations = (~df["시간"].between(0, 23)).sum()
+print(f"[정보] '시간' 이상치 보정 완료: 대상 날짜 {list(anomaly_dates)} -> 보정 후 범위 위반 {remaining_violations}건")
 
 TARGET = "평균"
 LEAK_COLS = ["15분", "30분", "45분", "60분", TARGET, "날짜"]
@@ -62,6 +78,6 @@ importances = pd.Series(forest_reg.feature_importances_, index=feature_cols).sor
 print("\n[변수중요도]")
 print(importances.to_string())
 
-importances.to_csv("rf_feature_importance.csv")
-with open("rf_metrics.txt", "w") as f:
+importances.to_csv("results/rf_feature_importance.csv")
+with open("results/rf_metrics.txt", "w") as f:
     f.write(f"train_mse={train_mse:.4f}\ntest_mse={test_mse:.4f}\n")

@@ -33,9 +33,12 @@
     (scipy는 scikit-learn의 의존 라이브러리라 이미 정상 동작이 확인된 상태).
     결과값은 동일합니다.
 """
+import os
 import numpy as np
 import pandas as pd
 from scipy.optimize import linprog
+
+os.makedirs("results", exist_ok=True)  # 결과물을 results/ 폴더에 정리 저장
 
 DATA_PATH = "./data/okm_augumented_2021.csv"
 df = pd.read_csv(DATA_PATH)
@@ -107,7 +110,7 @@ res_df = pd.DataFrame(
         "최소비용": cost_arr,
     }
 )
-res_df.to_csv("lp_optimization_result.csv", index=False)
+res_df.to_csv("results/lp_optimization_result.csv", index=False)
 
 total_cost = res_df["최소비용"].sum()
 mean_human = res_df["추천_P_human"].mean()
@@ -125,7 +128,7 @@ closest = res_df.iloc[(res_df["생산량_정규화"] - 0.17183770899999998).abs(
 print("\n[참고] 가이드북 예시 생산량(정규화 0.1718...)에 가장 가까운 실제 행:")
 print(closest.to_string(index=False))
 
-with open("lp_metrics.txt", "w") as f:
+with open("results/lp_metrics.txt", "w") as f:
     f.write(f"static_cost={res_static.fun:.4f}\n")
     f.write(f"static_P_human={P_human_static}\n")
     f.write(f"static_P_electric={P_electric_static}\n")

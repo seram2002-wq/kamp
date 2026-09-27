@@ -21,7 +21,10 @@
 유효성·일관성)의 단순평균을 무결성의 근사치로 계산하며, 이는 가이드북의
 공식이 아니라 우리가 임의로 정한 합산 방식임을 밝힙니다.
 """
+import os
 import pandas as pd
+
+os.makedirs("results", exist_ok=True)  # 결과물을 results/ 폴더에 정리 저장
 
 DATA_PATH = "./data/okm_augumented_2021.csv"
 df = pd.read_csv(DATA_PATH)
@@ -56,8 +59,24 @@ valid_date = df["날짜"].between(20210101, 20210914)
 valid_hour = df["시간"].between(0, 23)
 valid_rows = (valid_date & valid_hour).sum()
 validity = (valid_rows / n_rows) * 100
-print(f"\n[3] 유효성: 날짜(20210101~20210914) & 시간(0~23) 범위 만족 {valid_rows}행 / {n_rows}행")
-print(f"    유효성 지수 = {validity:.2f}%")
+print(f"\n[3] 유효성(보정 전): 날짜(20210101~20210914) & 시간(0~23) 범위 만족 {valid_rows}행 / {n_rows}행")
+print(f"    유효성 지수(보정 전) = {validity:.2f}%")
+
+# --- 이상치 보정: "시간" 컬럼 48건(2021-07-13, 07-15) 재구성 -------------
+# 두 날짜 모두 24행이 그대로 있고 앞뒤 날짜와 행 순서가 이어져 있어(진단 완료),
+# 데이터 누락이 아니라 "시간" 값만 깨진 것으로 판단. 두 날짜 모두 생산량이
+# 24시간 내내 0이라 순서 재구성에 무리가 없어, 날짜별 등장 순서를 0~23시로
+# 다시 채운다(행 삭제 없이 보정).
+anomaly_dates = df.loc[~df["시간"].between(0, 23), "날짜"].unique()
+for d in anomaly_dates:
+    idx = df.index[df["날짜"] == d]
+    df.loc[idx, "시간"] = range(len(idx))
+
+valid_hour_fixed = df["시간"].between(0, 23)
+valid_rows_fixed = (valid_date & valid_hour_fixed).sum()
+validity_fixed = (valid_rows_fixed / n_rows) * 100
+print(f"\n[3-보정] '시간' 이상치 보정 대상 날짜: {list(anomaly_dates)}")
+print(f"    유효성 지수(보정 후) = {validity_fixed:.2f}%  (보정 전 {validity:.2f}% -> 보정 후 {validity_fixed:.2f}%)")
 
 # -------------------------------------------------------------------------
 # 4) 일관성 (Consistency) = (자료형이 일치하는 데이터수/전체데이터수) x 100
@@ -82,25 +101,28 @@ print("\n[5] 정확성: 해당 데이터셋은 컬럼값이 서로 독립적이�
 # -------------------------------------------------------------------------
 # 6) 무결성 (Integrity) -> 측정 가능한 4개 지표의 단순평균 (※ 우리 임의 정의, 가이드북 공식 아님)
 # -------------------------------------------------------------------------
-integrity = (completeness + uniqueness + validity + consistency) / 4
-print(f"\n[6] 무결성(근사치, 단순평균): {integrity:.2f}%   ※ 가이드북의 정확한 합산 공식은 공개되지 않아 우리가 정한 방식입니다")
+integrity = (completeness + uniqueness + validity_fixed + consistency) / 4
+print(f"\n[6] 무결성(근사치, 단순평균, 보정 후 유효성 기준): {integrity:.2f}%   ※ 가이드북의 정확한 합산 공식은 공개되지 않아 우리가 정한 방식입니다")
 
 print("\n" + "=" * 60)
-print("가이드북 참고값 vs 이번 재현 결과")
+print("가이드북 참고값 vs 이번 재현 결과(보정 전/후)")
 print("=" * 60)
-print(f"{'지표':10s}{'가이드북 참고값':>18s}{'이번 재현값':>15s}")
-print(f"{'완전성':10s}{'99.68~100%':>18s}{completeness:>14.2f}%")
-print(f"{'유일성':10s}{'99.69%':>18s}{uniqueness:>14.2f}%")
-print(f"{'유효성':10s}{'100.00%':>18s}{validity:>14.2f}%")
-print(f"{'일관성':10s}{'100.00%':>18s}{consistency:>14.2f}%")
+print(f"{'지표':10s}{'가이드북 참고값':>18s}{'보정 전':>12s}{'보정 후':>12s}")
+print(f"{'완전성':10s}{'99.68~100%':>18s}{completeness:>11.2f}%{completeness:>11.2f}%")
+print(f"{'유일성':10s}{'99.69%':>18s}{uniqueness:>11.2f}%{uniqueness:>11.2f}%")
+print(f"{'유효성':10s}{'100.00%':>18s}{validity:>11.2f}%{validity_fixed:>11.2f}%")
+print(f"{'일관성':10s}{'100.00%':>18s}{consistency:>11.2f}%{consistency:>11.2f}%")
 
-with open("quality_metrics.txt", "w") as f:
+with open("results/quality_metrics.txt", "w") as f:
     f.write(f"completeness={completeness:.4f}\n")
     f.write(f"uniqueness={uniqueness:.4f}\n")
-    f.write(f"validity={validity:.4f}\n")
+    f.write(f"validity_before_fix={validity:.4f}\n")
+    f.write(f"validity_after_fix={validity_fixed:.4f}\n")
     f.write(f"consistency={consistency:.4f}\n")
     f.write(f"integrity_approx={integrity:.4f}\n")
     f.write(f"missing_cells={missing_cells}\n")
     f.write(f"duplicate_rows={n_duplicate_rows}\n")
+    f.write(f"time_anomaly_dates={list(anomaly_dates)}\n")
+    f.write(f"time_anomaly_rows_fixed={len(df.index[df['날짜'].isin(anomaly_dates)])}\n")
 
 print("\n[정보] quality_metrics.txt 저장 완료")
