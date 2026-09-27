@@ -91,7 +91,7 @@ with open("rnn_metrics.txt", "w") as f:
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-plt.rcParams["font.family"] = "NanumGothic"
+plt.rcParams["font.family"] = "Malgun Gothic"
 plt.rcParams["axes.unicode_minus"] = False
 
 plt.figure(figsize=(11, 4))
